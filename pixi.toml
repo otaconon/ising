@@ -2,7 +2,7 @@
 authors = ["otaconon <maksymilian.olbrys@gmail.com>"]
 channels = ["conda-forge"]
 name = "ising3d"
-platforms = ["win-64"]
+platforms = ["win-64", "linux-64", "osx-arm64"]
 version = "0.1.0"
 
 [tasks]
