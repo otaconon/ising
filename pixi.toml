@@ -1,0 +1,16 @@
+[workspace]
+authors = ["otaconon <maksymilian.olbrys@gmail.com>"]
+channels = ["conda-forge"]
+name = "ising3d"
+platforms = ["win-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+pixi-pycharm = ">=0.0.12,<0.0.13"
+python = "3.11.*"
+numpy = ">=2.4.6,<3"
+
+[pypi-dependencies]
+taichi = ">=1.7.4, <2"
