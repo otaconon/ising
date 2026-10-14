@@ -3,6 +3,7 @@ import sys
 import taichi as ti
 from ising3d import Ising3d
 from ising2d import Ising2d
+from ising_ray import IsingRay
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -17,6 +18,8 @@ def build_parser() -> argparse.ArgumentParser:
   p2.add_argument("-d", "--dimensions", nargs=2, type=int, default=[150, 150], metavar=("N", "M"))
   p3 = sub.add_parser("3d", parents=[common])
   p3.add_argument("-d", "--dimensions", nargs=3, type=int, default=[150, 150, 150], metavar=("N", "M", "K"))
+  p4 = sub.add_parser("3d-ray", parents=[common])
+  p4.add_argument("-d", "--dimensions", nargs=3, type=int, default=[150, 150, 150], metavar=("N", "M", "K"))
   return parser
 
 
@@ -34,7 +37,9 @@ def main(argv: list[str] | None = None) -> int:
 
   ti.init(arch=ti.gpu)
   
-  if args.simulation == "3d":
+  if args.simulation == "3d-ray":
+    sim = IsingRay(tuple(args.window_size), tuple(args.dimensions), args.temperature)
+  elif args.simulation == "3d":
     sim = Ising3d(tuple(args.window_size), tuple(args.dimensions), args.temperature)
   else:
     sim = Ising2d(tuple(args.window_size), tuple(args.dimensions), args.temperature)
