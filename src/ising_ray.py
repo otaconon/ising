@@ -38,17 +38,25 @@ class IsingRay:
   @ti.kernel
   def _render(self, ro: ti.math.vec3, target: ti.math.vec3, up: ti.math.vec3):
     for u, v in self.image:
-      self.image[u, v] = ti.math.vec3(1, 1, 1) * 1/self._ray_trace(u, v, ro, target, up)
+      self.image[u, v] = self._ray_trace(u, v, ro, target, up)
       
   @ti.func 
   def _ray_trace(self, u: int, v: int, ro, target, up):
     GRID_SIDE = self.spins.shape[0]
-    MAX_STEPS = 128 
+    MAX_STEPS = GRID_SIDE*3
     
     rd = self._ray_dir(u, v, ro, target, up)
     grid_min, grid_max = ti.math.vec3(0, 0, 0), ti.math.vec3(1, 1, 1)
     box = self._hit_box(ro, rd, grid_min, grid_max)
-    hit_t = 1e30
+    
+    T = 1.0
+    ALPHA = 0.01
+    color = tm.vec3(0.0)
+    VOXEL_COLOR = tm.vec3(0.5, 0.8, 0.9)
+    rd_len = rd.norm()
+    sigma = -ti.log(1.0 - ALPHA)
+    s_prev = 0.0
+    
     if box[0] <= box[1]:
       entry_t = box[0]
     
@@ -57,43 +65,41 @@ class IsingRay:
       step = ti.cast(ti.math.sign(rd), ti.i32)
       delta = ti.abs(1/rd)
       pos = ti.cast(ti.math.clamp(entry_pos, 0, GRID_SIDE-1), ti.i32)
-      
+     
       next_entry_t = (pos - entry_pos + max(step, 0)) / rd
-      axis = 0
-      for steps in range(MAX_STEPS):
+      for _ in range(MAX_STEPS):
+        s_next = next_entry_t.min()
         if self.spins[pos.x, pos.y, pos.z] == 1:
-          hit_t = entry_t
-          if steps > 0:
-            hit_t = entry_t + (next_entry_t[axis] - delta[axis]) / v_per_u[axis]
-          break
+          a = 1.0 - ti.exp(-sigma * (s_next - s_prev) * rd_len)
+          color += T * a * VOXEL_COLOR
+          T *= 1 - a
+          if T < 1e-3:
+            break
+          s_prev = s_next
 
         if next_entry_t.x < next_entry_t.y:
           if next_entry_t.x < next_entry_t.z:
             pos.x += step.x
             if pos.x < 0 or pos.x >= GRID_SIDE:
               break
-            axis = 0
             next_entry_t.x += delta.x
           else:
             pos.z += step.z
             if pos.z < 0 or pos.z >= GRID_SIDE:
               break
-            axis = 2
             next_entry_t.z += delta.z
         else:
           if next_entry_t.y < next_entry_t.z:
             pos.y += step.y
             if pos.y < 0 or pos.y >= GRID_SIDE:
               break
-            axis = 1
             next_entry_t.y += delta.y
           else:
             pos.z += step.z
             if pos.z < 0 or pos.z >= GRID_SIDE:
               break
-            axis = 2
             next_entry_t.z += delta.z
-    return hit_t
+    return color
     
   @ti.func
   def _ray_dir(self, u: int, v: int, ro, target, up):

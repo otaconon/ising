@@ -37,9 +37,6 @@ class Ising3d:
       scene.ambient_light((0.8, 0.8, 0.8))
       scene.point_light(pos=(0.5, 10, 1.0), color=(1, 1, 1))
 
-      temp = self.positions.to_numpy()
-      np.random.shuffle(temp)
-      self.positions.from_numpy(temp)
       self._simulate_half(0)
       self._simulate_half(1)
 
