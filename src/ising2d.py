@@ -1,4 +1,5 @@
 import taichi as ti
+import numpy as np
 
 @ti.data_oriented
 class Ising2d:
@@ -8,7 +9,6 @@ class Ising2d:
     self.acc = ti.field(ti.f32, shape=5) 
     self.spins = ti.field(dtype=ti.i8, shape=dims)
     self.img = ti.field(ti.f32, shape=dims)
-    
     self.set_temperature(1/T)
 
   def run(self):

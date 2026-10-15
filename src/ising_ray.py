@@ -12,14 +12,9 @@ class IsingRay:
     self.spins = ti.field(ti.i8, shape=dims)
     self.image = ti.Vector.field(3, ti.f32, shape=window_size)
 
-    self.rank_x = ti.field(ti.i32, shape=N)
-    self.rank_y = ti.field(ti.i32, shape=M)
-    self.rank_z = ti.field(ti.i32, shape=K)
-    
     self.set_temperature(1 / T)
 
   def run(self):
-    N, M, K = self.spins.shape
     window = ti.ui.Window("Ising model", res=self.window_size)
     canvas = window.get_canvas()
     camera = ti.ui.Camera()
@@ -31,6 +26,10 @@ class IsingRay:
 
     while window.running:
       camera.track_user_inputs(window, movement_speed=0.03, yaw_speed=10, pitch_speed=10, hold_key=ti.ui.LMB)
+      
+      self._simulate_half(0) 
+      self._simulate_half(1)
+      
       ro, target, up = camera.curr_position, camera.curr_lookat, camera.curr_up
       self._render(ro, target, up)
       canvas.set_image(self.image)
@@ -39,9 +38,62 @@ class IsingRay:
   @ti.kernel
   def _render(self, ro: ti.math.vec3, target: ti.math.vec3, up: ti.math.vec3):
     for u, v in self.image:
-      rd = self._ray_dir(u, v, ro, target, up)
-      tn, tf = self._hit_box(ro, rd, (0, 0, 0), (1, 1, 1))
-      self.image[u, v] = ti.select(tf >= tn, ti.math.vec3(1.0, 1.0, 1.0), ti.math.vec3(0.0)) / tn
+      self.image[u, v] = ti.math.vec3(1, 1, 1) * 1/self._ray_trace(u, v, ro, target, up)
+      
+  @ti.func 
+  def _ray_trace(self, u: int, v: int, ro, target, up):
+    GRID_SIDE = self.spins.shape[0]
+    MAX_STEPS = 128 
+    
+    rd = self._ray_dir(u, v, ro, target, up)
+    grid_min, grid_max = ti.math.vec3(0, 0, 0), ti.math.vec3(1, 1, 1)
+    box = self._hit_box(ro, rd, grid_min, grid_max)
+    hit_t = 1e30
+    if box[0] <= box[1]:
+      entry_t = box[0]
+    
+      v_per_u = GRID_SIDE/(grid_max - grid_min)
+      entry_pos = ((ro + rd * (entry_t + 0.0001)) - grid_min) * v_per_u
+      step = ti.cast(ti.math.sign(rd), ti.i32)
+      delta = ti.abs(1/rd)
+      pos = ti.cast(ti.math.clamp(entry_pos, 0, GRID_SIDE-1), ti.i32)
+      
+      next_entry_t = (pos - entry_pos + max(step, 0)) / rd
+      axis = 0
+      for steps in range(MAX_STEPS):
+        if self.spins[pos.x, pos.y, pos.z] == 1:
+          hit_t = entry_t
+          if steps > 0:
+            hit_t = entry_t + (next_entry_t[axis] - delta[axis]) / v_per_u[axis]
+          break
+
+        if next_entry_t.x < next_entry_t.y:
+          if next_entry_t.x < next_entry_t.z:
+            pos.x += step.x
+            if pos.x < 0 or pos.x >= GRID_SIDE:
+              break
+            axis = 0
+            next_entry_t.x += delta.x
+          else:
+            pos.z += step.z
+            if pos.z < 0 or pos.z >= GRID_SIDE:
+              break
+            axis = 2
+            next_entry_t.z += delta.z
+        else:
+          if next_entry_t.y < next_entry_t.z:
+            pos.y += step.y
+            if pos.y < 0 or pos.y >= GRID_SIDE:
+              break
+            axis = 1
+            next_entry_t.y += delta.y
+          else:
+            pos.z += step.z
+            if pos.z < 0 or pos.z >= GRID_SIDE:
+              break
+            axis = 2
+            next_entry_t.z += delta.z
+    return hit_t
     
   @ti.func
   def _ray_dir(self, u: int, v: int, ro, target, up):
@@ -49,8 +101,8 @@ class IsingRay:
     f = (target-ro).normalized()
     r = f.cross(up).normalized()
     w = r.cross(f)
-    px = (2*(u + 0.5)/W - 1.0)
-    py = (2*(v + 0.5)/H - 1.0)
+    px = (2*(u + 0.5)/W - 1.0) * W/H
+    py = (2*(v + 0.5)/H - 1.0) * W/H
     rd = f + px*r + py*w
     for d in ti.static(range(3)):
       if ti.abs(rd[d]) < 1e-6:
@@ -58,21 +110,12 @@ class IsingRay:
     return rd
     
   @ti.func
-  def _hit_box(self, ro, rd, lo, hi) -> tuple:
+  def _hit_box(self, ro, rd, lo, hi):
     inv = 1.0 / rd
     t0, t1 = (lo - ro) * inv, (hi - ro) * inv
-    return ti.max(ti.min(t0, t1).max(), 0.0), ti.max(t0, t1).min()
-   
-
-  def _update_ranks(self, c):
-    N = self.spins.shape[0]
-    for f, ca in ((self.rank_x, c[0]), (self.rank_y, c[1]), (self.rank_z, c[2])):
-      n = f.shape[0]
-      d = np.abs(np.arange(n) / N - ca)
-      order = np.argsort(-d, kind="stable")
-      r = np.empty(n, np.int32)
-      r[order] = np.arange(n, dtype=np.int32)
-      f.from_numpy(r)
+    t_near = ti.min(t0, t1).max()
+    t_far  = ti.max(t0, t1).min()
+    return tm.vec2(ti.max(t_near, 0.0), t_far)
 
   @ti.kernel
   def set_temperature(self, beta: float):
@@ -103,14 +146,3 @@ class IsingRay:
       z = 2 * h + (x + y + parity) % 2
       if self._flip(x, y, z):
         self.spins[x, y, z] = -self.spins[x, y, z]
-
-  @ti.kernel
-  def _collect(self):
-    N, M, K = self.spins.shape
-    for x, y, z in self.spins:
-      i = (self.rank_x[x] * M + self.rank_y[y]) * K + self.rank_z[z]
-      self.positions[i] = tm.vec3(x, y, z) / N
-      if self.spins[x, y, z] == 1:
-        self.colors[i] = tm.vec4(0.7, 0.6, 0.4, 0.05)
-      else:
-        self.colors[i] = tm.vec4(0.3, 0.6, 0.7, 0.0)
